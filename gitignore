@@ -1,0 +1,72 @@
+# =========================================================
+# OS / Editor
+# =========================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# =========================================================
+# Go
+# =========================================================
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, build dir
+*.test
+*.out
+bin/
+dist/
+
+# Go workspace / cache
+*.log
+*.prof
+*.pprof
+*.cover
+*.coverprofile
+*.test
+
+# Go vendor (kalau pakai go mod vendor)
+vendor/
+
+# =========================================================
+# Env / Config
+# =========================================================
+.env
+.env.*
+!env.example   # biar contoh env tetap di repo
+
+# =========================================================
+# Docker
+# =========================================================
+/docker-compose.override.yml
+/db_data/
+/redis_data/
+/postgres_data/
+/volumes/
+
+# =========================================================
+# Logs
+# =========================================================
+*.log
+logs/
+log/
+
+# =========================================================
+# Node (kalau ada frontend di dalam project)
+# =========================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================================================
+# Coverage / Reports
+# =========================================================
+coverage/
+*.lcov

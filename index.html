@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Realtime Chat</title>
+  <style>
+    body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f7f7f7; margin: 0; height: 100vh; }
+    h1 { margin: 10px 0; }
+    #room-selector { display: flex; gap: 8px; margin-bottom: 8px; align-items:center; }
+    select { padding: 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+    #chat-box { display: flex; flex-direction: column; width: 90%; max-width: 600px; padding: 10px; overflow-y: auto; background: white; border: 1px solid #ddd; border-radius: 8px; flex: 1; }
+    #chat-box li { list-style: none; margin: 6px 0; max-width: 70%; padding: 8px 12px; border-radius: 12px; font-size: 14px; word-wrap: break-word; position: relative; }
+    #chat-box li.self { background-color: #2563eb; color: white; align-self: flex-end; margin-left: auto; border-bottom-right-radius: 0; }
+    #chat-box li.other { background-color: #e5e7eb; color: black; align-self: flex-start; margin-right: auto; border-bottom-left-radius: 0; }
+    #chat-box li .receipt { font-size: 10px; position: absolute; bottom: -14px; right: 6px; }
+    #controls { display: flex; width: 90%; max-width: 600px; gap: 8px; padding: 10px; }
+    input, button { padding: 10px; font-size: 16px; }
+    input { flex: 1; border-radius: 6px; border: 1px solid #ccc; }
+    button { background: #007bff; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    #status { font-size: 14px; color: gray; margin: 5px 0; }
+  </style>
+</head>
+<body>
+  <h1>Realtime Chat</h1>
+  <div id="status">🔴 Connecting...</div>
+
+  <div id="room-selector">
+    <label for="rooms">Room:</label>
+    <select id="rooms"></select>
+    <div id="new-msg-badge" style="color:#e11; font-size:13px; margin-left:8px;"></div>
+  </div>
+
+  <ul id="chat-box"></ul>
+  <div id="controls">
+    <input id="msg" type="text" placeholder="Ketik pesan..." onkeydown="if(event.key==='Enter'){sendMessage()}">
+    <button onclick="sendMessage()">Kirim</button>
+  </div>
+
+<script>
+const token = prompt("Masukkan token JWT:", "");
+const ws = new WebSocket(`ws://localhost:8080/ws?token=${token}`);
+
+const chatBox = document.getElementById("chat-box");
+const statusEl = document.getElementById("status");
+const roomSelect = document.getElementById("rooms");
+const badgeEl = document.getElementById("new-msg-badge");
+
+// --- JWT decode ---
+function parseJwt(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    return JSON.parse(atob(parts[1]));
+  } catch { return null; }
+}
+const payload = parseJwt(token) || {};
+const currentUser = payload?.name || payload?.email || payload?.sub || "Unknown";
+const usersid = payload?.id || payload?.sub || null;
+
+// --- State ---
+const messagesByRoom = {};
+let rooms = Array.isArray(payload?.RoomsId) ? payload.RoomsId : (payload?.room_id ? [payload.room_id] : [1]);
+let currentRoom = rooms[0];
+let unreadCounts = {};
+
+// --- UI setup ---
+function populateRooms() {
+  roomSelect.innerHTML = "";
+  rooms.forEach(r => {
+    const opt = document.createElement("option");
+    opt.value = r;
+    opt.textContent = `Room ${r}`;
+    roomSelect.appendChild(opt);
+
+    if (!messagesByRoom[r]) messagesByRoom[r] = [];
+    if (!unreadCounts[r]) unreadCounts[r] = 0;
+  });
+  roomSelect.value = currentRoom;
+  renderRoomMessages(currentRoom);
+  updateBadge();
+}
+function updateBadge() {
+  const totalUnread = rooms.reduce((acc, r) => acc + (unreadCounts[r] || 0), 0);
+  badgeEl.textContent = totalUnread > 0 ? `🔔 ${totalUnread} new` : "";
+}
+function renderRoomMessages(roomId) {
+  chatBox.innerHTML = "";
+  (messagesByRoom[roomId] || []).forEach(m => appendMessageToDOM(m, false));
+  chatBox.scrollTop = chatBox.scrollHeight;
+  unreadCounts[roomId] = 0;
+  updateBadge();
+}
+function appendMessageToDOM(message, scroll=true) {
+  const senderName = message.sender_name || `User#${message.sender_id}`;
+  const li = document.createElement("li");
+  li.textContent = `${senderName}: ${message.content}`;
+  if (message.sender_id == usersid) {
+    li.classList.add("self");
+    const receipt = document.createElement("span");
+    receipt.classList.add("receipt");
+    receipt.textContent = message.read ? "✅✅" : "✅";
+    receipt.style.color = message.read ? "blue" : "gray";
+    li.appendChild(receipt);
+  } else {
+    li.classList.add("other");
+  }
+  chatBox.appendChild(li);
+  if (scroll) chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+// --- WebSocket handlers ---
+ws.onopen = () => {
+  statusEl.textContent = "🟢 Connected as " + currentUser;
+  console.log("Connected. Current User:", payload);
+  markMessagesAsRead(currentRoom);
+};
+ws.onclose = () => { statusEl.textContent = "🔴 Disconnected"; };
+ws.onmessage = (event) => {
+  let message;
+  try { message = JSON.parse(event.data); } catch { return; }
+
+  if (message.type === "system") {
+    if (Array.isArray(message.rooms)) rooms = message.rooms.map(r => Number(r));
+    if (message.activeRoom) currentRoom = Number(message.activeRoom);
+    rooms.forEach(r => { if (!messagesByRoom[r]) messagesByRoom[r] = []; if (!unreadCounts[r]) unreadCounts[r] = 0; });
+    populateRooms();
+    return;
+  }
+  if (message.type === "history") {
+    const rid = Number(message.room_id);
+    messagesByRoom[rid] = message.messages;
+    renderRoomMessages(rid);
+    return;
+  }
+  if (message.type === "receipt" && message.status === "read") {
+    console.log(`User ${message.user_id} read messages in room ${message.room_id}`);
+    // Update semua pesan di room ini jadi read
+    (messagesByRoom[message.room_id] || []).forEach(m => { if (m.sender_id == usersid) m.read = true; });
+    renderRoomMessages(currentRoom);
+    return;
+  }
+
+  // Normal message
+  const rid = Number(message.room_id || 0);
+  if (!messagesByRoom[rid]) messagesByRoom[rid] = [];
+  messagesByRoom[rid].push(message);
+  if (rid === Number(currentRoom)) {
+    appendMessageToDOM(message);
+  } else {
+    unreadCounts[rid] = (unreadCounts[rid] || 0) + 1;
+    updateBadge();
+  }
+};
+
+// --- Mark read ---
+function markMessagesAsRead(roomId) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "read", room_id: roomId, user_id: usersid }));
+  }
+}
+
+// --- Send message ---
+function sendMessage() {
+  const input = document.getElementById("msg");
+  if (!input.value) return;
+  ws.send(JSON.stringify({ type: "text", sender_id: usersid, room_id: currentRoom, content: input.value }));
+  input.value = "";
+}
+
+// --- Room change ---
+roomSelect.addEventListener("change", () => {
+  currentRoom = parseInt(roomSelect.value);
+  renderRoomMessages(currentRoom);
+  markMessagesAsRead(currentRoom);
+});
+
+// init UI
+populateRooms();
+</script>
+</body>
+</html>
